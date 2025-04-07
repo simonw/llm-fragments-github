@@ -11,7 +11,7 @@ def register_fragment_loaders(register):
     register("github", github_loader)
 
 
-def github_loader(argument: str) -> List[llm.FragmentString]:
+def github_loader(argument: str) -> List[llm.Fragment]:
     """
     Load files from a GitHub repository as fragments.
 
@@ -19,7 +19,7 @@ def github_loader(argument: str) -> List[llm.FragmentString]:
         argument: GitHub repository URL or username/repository format
 
     Returns:
-        List of FragmentString objects, one for each file in the repository
+        List of Fragment objects, one for each file in the repository
     """
     # Normalize the repository argument
     if not argument.startswith(("http://", "https://")):
@@ -71,7 +71,7 @@ def github_loader(argument: str) -> List[llm.FragmentString]:
 
                         # Add the file as a fragment
                         fragments.append(
-                            llm.FragmentString(content, f"{argument}/{relative_path}")
+                            llm.Fragment(content, f"{argument}/{relative_path}")
                         )
                     except UnicodeDecodeError:
                         # Skip files that can't be decoded as UTF-8
