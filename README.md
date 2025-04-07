@@ -15,7 +15,10 @@ llm install llm-fragments-github
 ```
 ## Usage
 
-Usage instructions go here.
+Use `-f github:user/repo` to include every text file from the specified GitHub repo as a fragment. For example:
+```bash
+llm -f github:simonw/files-to-prompt 'suggest new features for this tool'
+```
 
 ## Development
 
