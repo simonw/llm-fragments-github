@@ -21,7 +21,7 @@ llm -f github:simonw/files-to-prompt 'suggest new features for this tool'
 ```
 Ue `-f issue:user/repo/number` to include the combined Markdown text of a specific issue. For example:
 ```bash
-llm -f https://raw.githubusercontent.com/simonw/llm-fragments-github/refs/tags/0.1/llm_fragments_github.py\
+llm -f https://raw.githubusercontent.com/simonw/llm-fragments-github/refs/tags/0.1/llm_fragments_github.py \
   -f issue:simonw/llm-fragments-github/3 \
   'Propose an implementation for this issue'
 ```
