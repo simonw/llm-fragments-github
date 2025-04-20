@@ -19,6 +19,18 @@ Use `-f github:user/repo` to include every text file from the specified GitHub r
 ```bash
 llm -f github:simonw/files-to-prompt 'suggest new features for this tool'
 ```
+Ue `-f issue:user/repo/number` to include the combined Markdown text of a specific issue. For example:
+```bash
+llm -f https://raw.githubusercontent.com/simonw/llm-fragments-github/refs/tags/0.1/llm_fragments_github.py\
+  -f issue:simonw/llm-fragments-github/3 \
+  'Propose an implementation for this issue'
+```
+The `issue:` prefix can also accept a URL to a GitHub issue, for example:
+```bash
+llm -f issue:https://github.com/simonw/llm-fragments-github/issues/3 \
+  'muse on this a bit'
+```
+Set an API token in the environment variable `GITHUB_TOKEN` to access private repositories or increase your rate limit.
 
 ## Development
 
