@@ -1,6 +1,6 @@
 [project]
 name = "llm-fragments-github"
-version = "0.2"
+version = "0.2.1"
 description = "Load GitHub repository contents as LLM fragments"
 readme = "README.md"
 authors = [{name = "Simon Willison"}]
