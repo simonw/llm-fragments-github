@@ -18,13 +18,9 @@ def register_fragment_loaders(register):
 
 def github_loader(argument: str) -> List[llm.Fragment]:
     """
-    Load files from a GitHub repository as fragments.
+    Load files from a GitHub repository as fragments
 
-    Args:
-        argument: GitHub repository URL or username/repository format
-
-    Returns:
-        List of Fragment objects, one for each file in the repository
+    Argument is a GitHub repository URL or username/repository
     """
     # Normalize the repository argument
     if not argument.startswith(("http://", "https://")):
@@ -93,9 +89,10 @@ def github_loader(argument: str) -> List[llm.Fragment]:
 
 def github_issue_loader(argument: str) -> llm.Fragment:
     """
-    argument is either
-        "owner/repo/NUMBER"
-    or  "https://github.com/owner/repo/issues/NUMBER"
+    Fetch GitHub issue and comments as Markdown
+
+    Argument is either "owner/repo/NUMBER"
+    or "https://github.com/owner/repo/issues/NUMBER"
     """
     try:
         owner, repo, number = _parse_argument(argument)
