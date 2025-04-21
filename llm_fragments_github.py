@@ -4,7 +4,6 @@ import llm
 import os
 import pathlib
 import re
-import shutil
 import subprocess
 import tempfile
 from urllib.parse import urlparse
@@ -51,32 +50,34 @@ def github_loader(argument: str) -> List[llm.Fragment]:
                 cwd=temp_dir,
             )
 
-            # Remove the .git directory if it still exists
-            git_dir = pathlib.Path(temp_dir) / ".git"
-            if git_dir.exists():
-                shutil.rmtree(git_dir)
-
             # Process the cloned repository
             repo_path = pathlib.Path(temp_dir)
             fragments = []
 
-            # Walk through all files in the repository
-            for file_path in repo_path.glob("**/*"):
-                if file_path.is_file():
-                    try:
-                        # Try to read the file as UTF-8
-                        content = file_path.read_text(encoding="utf-8")
+            # Walk through all files in the repository, excluding .git directory
+            for root, dirs, files in os.walk(repo_path):
+                # Remove .git from dirs to prevent descending into it
+                if ".git" in dirs:
+                    dirs.remove(".git")
 
-                        # Create a relative path for the fragment identifier
-                        relative_path = file_path.relative_to(repo_path)
+                # Process files
+                for file in files:
+                    file_path = pathlib.Path(root) / file
+                    if file_path.is_file():
+                        try:
+                            # Try to read the file as UTF-8
+                            content = file_path.read_text(encoding="utf-8")
 
-                        # Add the file as a fragment
-                        fragments.append(
-                            llm.Fragment(content, f"{argument}/{relative_path}")
-                        )
-                    except UnicodeDecodeError:
-                        # Skip files that can't be decoded as UTF-8
-                        continue
+                            # Create a relative path for the fragment identifier
+                            relative_path = file_path.relative_to(repo_path)
+
+                            # Add the file as a fragment
+                            fragments.append(
+                                llm.Fragment(content, f"{argument}/{relative_path}")
+                            )
+                        except UnicodeDecodeError:
+                            # Skip files that can't be decoded as UTF-8
+                            continue
 
             return fragments
         except subprocess.CalledProcessError as e:
