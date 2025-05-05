@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 def register_fragment_loaders(register):
     register("github", github_loader)
     register("issue", github_issue_loader)
+    register("pr", github_pr_loader)
 
 
 def github_loader(argument: str) -> List[llm.Fragment]:
@@ -88,24 +89,23 @@ def github_loader(argument: str) -> List[llm.Fragment]:
             raise ValueError(f"Error processing repository {repo_url}: {str(e)}")
 
 
-def github_issue_loader(argument: str) -> llm.Fragment:
+def github_issue_loader(argument: str, noun="issues") -> llm.Fragment:
     """
-    Fetch GitHub issue and comments as Markdown
+    Fetch GitHub issue/pull and comments as Markdown
 
-    Argument is either "owner/repo/NUMBER"
-    or "https://github.com/owner/repo/issues/NUMBER"
+    Argument is either "owner/repo/NUMBER" or URL to an issue
     """
     try:
         owner, repo, number = _parse_argument(argument)
     except ValueError as ex:
         raise ValueError(
-            "Issue fragments must be issue:owner/repo/NUMBER or a full "
-            "GitHub issue URL – received {!r}".format(argument)
+            "Fragment must be {}:owner/repo/NUMBER or a full "
+            "GitHub issue URL – received {!r}".format(noun, argument)
         ) from ex
 
     client = _github_client()
 
-    issue_api = f"https://api.github.com/repos/{owner}/{repo}/issues/{number}"
+    issue_api = f"https://api.github.com/repos/{owner}/{repo}/{noun}/{number}"
 
     # 1. The issue itself
     issue_resp = client.get(issue_api)
@@ -118,10 +118,43 @@ def github_issue_loader(argument: str) -> llm.Fragment:
     # 3. Markdown
     markdown = _to_markdown(issue, comments)
 
+    url_noun = "issues" if noun == "issues" else "pull"
+
     return llm.Fragment(
         markdown,
-        source=f"https://github.com/{owner}/{repo}/issues/{number}",
+        source=f"https://github.com/{owner}/{repo}/{url_noun}/{number}",
     )
+
+
+def github_pr_loader(argument: str) -> List[llm.Fragment]:
+    """
+    Fetch GitHub pull request with comments and diff as Markdown
+
+    Argument is either "owner/repo/NUMBER" or URL to a pull request
+    """
+    try:
+        owner, repo, number = _parse_argument(argument)
+    except ValueError as ex:
+        raise ValueError(
+            "Fragment must be owner/repo/NUMBER or a full "
+            "GitHub pull request URL – received {!r}".format(argument)
+        ) from ex
+
+    client = _github_client()
+    markdown_fragment = github_issue_loader(argument, noun="pulls")
+    diff_api = f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}.diff"
+    diff_resp = client.get(
+        diff_api, headers={"Accept": "application/vnd.github.v3.diff"}
+    )
+    _raise_for_status(diff_resp, diff_api)
+    diff = diff_resp.text
+    return [
+        markdown_fragment,
+        llm.Fragment(
+            diff,
+            source=diff_api,
+        ),
+    ]
 
 
 def _parse_argument(arg: str) -> Tuple[str, str, int]:
@@ -133,7 +166,7 @@ def _parse_argument(arg: str) -> Tuple[str, str, int]:
         parsed = urlparse(arg)
         parts = parsed.path.strip("/").split("/")
         # /owner/repo/issues/123
-        if len(parts) >= 4 and parts[2] == "issues":
+        if len(parts) >= 4 and parts[2] in ("issues", "pull"):
             owner, repo, _, number = parts[:4]
             return owner, repo, int(number)
 
