@@ -25,6 +25,8 @@ jobs:
       run: |
         pip install -e '.[test]'
     - name: Run tests
+      env:
+        GITHUB_TOKEN: ${{ secrets.TEST_PAT }}
       run: |
         python -m pytest
   deploy:
