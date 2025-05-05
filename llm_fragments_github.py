@@ -99,8 +99,8 @@ def github_issue_loader(argument: str, noun="issues") -> llm.Fragment:
         owner, repo, number = _parse_argument(argument)
     except ValueError as ex:
         raise ValueError(
-            "Fragment must be {}:owner/repo/NUMBER or a full "
-            "GitHub issue URL – received {!r}".format(noun, argument)
+            "Fragment must be issue:owner/repo/NUMBER or a full "
+            "GitHub issue URL – received {!r}".format(argument)
         ) from ex
 
     client = _github_client()

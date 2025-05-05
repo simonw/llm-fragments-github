@@ -54,5 +54,5 @@ def test_github_issue_loader(argument):
         github_issue_loader("This is bad")
     assert (
         str(ex2.value)
-        == "Issue fragments must be issue:owner/repo/NUMBER or a full GitHub issue URL – received 'This is bad'"
+        == "Fragment must be issue:owner/repo/NUMBER or a full GitHub issue URL – received 'This is bad'"
     )
