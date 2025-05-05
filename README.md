@@ -32,6 +32,12 @@ llm -f issue:https://github.com/simonw/llm-fragments-github/issues/3 \
 ```
 Set an API token in the environment variable `GITHUB_TOKEN` to access private repositories or increase your rate limit.
 
+Use` -f pr:user/repo/number` to load the Markdown text and diff for a specified pull request. This also accepts a URL to a pull request.
+
+```bash
+llm -f pr:simonw/llm-fragments-github/9 'code review'
+```
+
 ## Development
 
 To set up this plugin locally, first checkout the code. Then create a new virtual environment:
