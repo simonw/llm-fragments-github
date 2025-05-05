@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tempfile
 from urllib.parse import urlparse
+import time
 
 
 @llm.hookimpl
@@ -58,7 +59,7 @@ def github_loader(argument: str) -> List[llm.Fragment]:
 
             # Process the cloned repository
             repo_path = pathlib.Path(temp_dir)
-            fragments = []
+            fragments: List[llm.Fragment] = []
 
             # Walk through all files in the repository
             for file_path in repo_path.glob("**/*"):
@@ -87,27 +88,64 @@ def github_loader(argument: str) -> List[llm.Fragment]:
             raise ValueError(f"Error processing repository {repo_url}: {str(e)}")
 
 
-def github_issue_loader(argument: str) -> llm.Fragment:
+def github_issue_loader(argument: str) -> List[llm.Fragment]:
     """
-    Fetch GitHub issue and comments as Markdown
+    Fetch one or more GitHub issues (and their comments) as Markdown fragments.
 
-    Argument is either "owner/repo/NUMBER"
-    or "https://github.com/owner/repo/issues/NUMBER"
+    Argument can be:
+      - "owner/repo/NUMBER"
+      - "owner/repo/NUM1,NUM2,NUM3"
+      - "https://github.com/owner/repo/issues/NUMBER"
+      - "https://github.com/owner/repo/issues/NUM1,NUM2,NUM3"
     """
-    try:
-        owner, repo, number = _parse_argument(argument)
-    except ValueError as ex:
-        raise ValueError(
-            "Issue fragments must be issue:owner/repo/NUMBER or a full "
-            "GitHub issue URL – received {!r}".format(argument)
-        ) from ex
-
+    owner, repo, numbers = _parse_issue_argument(argument)
     client = _github_client()
 
+    fragments: List[llm.Fragment] = []
+    for number in numbers:
+        fragments.append(_load_single_issue(client, owner, repo, number))
+    return fragments
+
+
+def _parse_issue_argument(arg: str) -> Tuple[str, str, List[int]]:
+    """
+    Returns (owner, repo, [number, ...]) or raises ValueError.
+    Supports comma-separated numbers.
+    """
+    # Form 1: full URL
+    if arg.startswith("http://") or arg.startswith("https://"):
+        parsed = urlparse(arg)
+        parts = parsed.path.strip("/").split("/")
+        # /owner/repo/issues/123 or /owner/repo/issues/1,2,3
+        if len(parts) >= 4 and parts[2] == "issues":
+            owner, repo = parts[0], parts[1]
+            number_part = parts[3]
+            nums = [int(n) for n in number_part.split(",") if n.isdigit()]
+            if not nums:
+                raise ValueError(f"No valid issue numbers in {arg}")
+            return owner, repo, nums
+
+    # Form 2: owner/repo/number or owner/repo/1,2,3
+    m = re.match(r"([^/]+)/([^/]+)/([\d,]+)$", arg)
+    if m:
+        owner, repo, number_part = m.groups()
+        nums = [int(n) for n in number_part.split(",") if n.isdigit()]
+        if not nums:
+            raise ValueError(f"No valid issue numbers in {arg}")
+        return owner, repo, nums
+
+    raise ValueError(
+        "Issue fragments must be owner/repo/NUMBER(s) or a full GitHub issue URL"
+    )
+
+
+def _load_single_issue(
+    client: httpx.Client, owner: str, repo: str, number: int
+) -> llm.Fragment:
     issue_api = f"https://api.github.com/repos/{owner}/{repo}/issues/{number}"
 
     # 1. The issue itself
-    issue_resp = client.get(issue_api)
+    issue_resp = _get_with_rate_limit(client, issue_api)
     _raise_for_status(issue_resp, issue_api)
     issue = issue_resp.json()
 
@@ -118,31 +156,60 @@ def github_issue_loader(argument: str) -> llm.Fragment:
     markdown = _to_markdown(issue, comments)
 
     return llm.Fragment(
-        markdown,
-        source=f"https://github.com/{owner}/{repo}/issues/{number}",
+        markdown, source=f"https://github.com/{owner}/{repo}/issues/{number}"
     )
 
 
-def _parse_argument(arg: str) -> Tuple[str, str, int]:
+def _get_with_rate_limit(client: httpx.Client, url: str) -> httpx.Response:
     """
-    Returns (owner, repo, number) or raises ValueError
+    Perform client.get(url). If GitHub responds 403 or 429 with
+    rate-limit headers, sleep until reset and retry.
     """
-    # Form 1: full URL
-    if arg.startswith("http://") or arg.startswith("https://"):
-        parsed = urlparse(arg)
-        parts = parsed.path.strip("/").split("/")
-        # /owner/repo/issues/123
-        if len(parts) >= 4 and parts[2] == "issues":
-            owner, repo, _, number = parts[:4]
-            return owner, repo, int(number)
+    while True:
+        resp = client.get(url)
+        if resp.status_code in (403, 429):
+            # Try Retry-After first
+            ra = resp.headers.get("Retry-After")
+            if ra and ra.isdigit():
+                wait = int(ra)
+            elif "X-RateLimit-Reset" in resp.headers:
+                reset_ts = int(resp.headers["X-RateLimit-Reset"])
+                now = int(time.time())
+                wait = max(reset_ts - now, 0)
+            else:
+                # fallback
+                wait = 60
+            time.sleep(wait)
+            continue
+        return resp
 
-    # Form 2: owner/repo/number
-    m = re.match(r"([^/]+)/([^/]+)/(\d+)$", arg)
-    if m:
-        owner, repo, number = m.groups()
-        return owner, repo, int(number)
 
-    raise ValueError("Issue should be org/repo/NUMBER or a full GitHub URL")
+def _get_all_pages(client: httpx.Client, url: str) -> List[dict]:
+    items: List[dict] = []
+    while url:
+        resp = _get_with_rate_limit(client, url)
+        _raise_for_status(resp, url)
+        items.extend(resp.json())
+
+        # Link header pagination
+        url = None
+        link = resp.headers.get("Link")
+        if link:
+            for part in link.split(","):
+                if 'rel="next"' in part:
+                    url = part[part.find("<") + 1 : part.find(">")]
+                    break
+    return items
+
+
+def _parse_single_argument(arg: str) -> Tuple[str, str, int]:
+    """
+    Kept for backwards compatibility if you need a single issue parser.
+    """
+    owner, repo, nums = _parse_issue_argument(arg)
+    if len(nums) != 1:
+        raise ValueError("Expected exactly one issue number")
+    return owner, repo, nums[0]
 
 
 def _github_client() -> httpx.Client:
@@ -160,24 +227,6 @@ def _raise_for_status(resp: httpx.Response, url: str) -> None:
         raise ValueError(
             f"GitHub API request failed [{resp.status_code}] for {url}"
         ) from ex
-
-
-def _get_all_pages(client: httpx.Client, url: str) -> List[dict]:
-    items: List[dict] = []
-    while url:
-        resp = client.get(url)
-        _raise_for_status(resp, url)
-        items.extend(resp.json())
-
-        # Link header pagination
-        url = None
-        link = resp.headers.get("Link")
-        if link:
-            for part in link.split(","):
-                if part.endswith('rel="next"'):
-                    url = part[part.find("<") + 1 : part.find(">")]
-                    break
-    return items
 
 
 def _to_markdown(issue: dict, comments: List[dict]) -> str:
