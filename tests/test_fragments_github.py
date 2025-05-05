@@ -4,7 +4,10 @@ import pytest
 
 def test_github_loader():
     fragments = github_loader("simonw/test-repo-for-llm-fragments-github")
-    assert [(fragment.source, str(fragment)) for fragment in fragments] == [
+    normalized = [
+        (fragment.source.replace("\\", "/"), str(fragment)) for fragment in fragments
+    ]
+    assert normalized == [
         (
             "simonw/test-repo-for-llm-fragments-github/README.md",
             "# test-repo-for-llm-fragments-github\nUsed by tests for https://github.com/simonw/llm-fragments-github\n",
