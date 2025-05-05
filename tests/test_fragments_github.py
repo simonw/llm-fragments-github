@@ -1,4 +1,4 @@
-from llm_fragments_github import github_loader, github_issue_loader
+from llm_fragments_github import github_loader, github_issue_loader, github_pr_loader
 import pytest
 
 
@@ -55,4 +55,39 @@ def test_github_issue_loader(argument):
     assert (
         str(ex2.value)
         == "Fragment must be issue:owner/repo/NUMBER or a full GitHub issue URL – received 'This is bad'"
+    )
+
+
+@pytest.mark.parametrize(
+    "argument",
+    (
+        "simonw/test-repo-for-llm-fragments-github/2",
+        "https://github.com/simonw/test-repo-for-llm-fragments-github/pull/2",
+    ),
+)
+def test_github_pr_loader(argument):
+    fragments = github_pr_loader(argument)
+    assert len(fragments) == 2
+    assert (
+        fragments[0].source
+        == "https://github.com/simonw/test-repo-for-llm-fragments-github/pull/2"
+    )
+    assert (
+        str(fragments[0])
+        == "# Example PR\n\n*Posted by @simonw*\n\nThis is an example PR.\n"
+    )
+    assert (
+        fragments[1].source
+        == "https://api.github.com/repos/simonw/test-repo-for-llm-fragments-github/pulls/2.diff"
+    )
+    assert str(fragments[1]) == (
+        "diff --git a/example/file.txt b/example/file.txt\n"
+        "index e738d76..daf57b5 100644\n"
+        "--- a/example/file.txt\n"
+        "+++ b/example/file.txt\n"
+        "@@ -1 +1,3 @@\n"
+        " This is an example file.\n"
+        "+\n"
+        "+It has been modified in this PR.\n"
+        "\\ No newline at end of file\n"
     )
