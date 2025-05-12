@@ -116,7 +116,10 @@ def github_issue_loader(argument: str, noun="issues") -> llm.Fragment:
     comments = _get_all_pages(client, f"{issue_api}/comments?per_page=100")
 
     # 3. Markdown
-    markdown = _to_markdown(issue, comments)
+    raw_md = _to_markdown(issue, comments)
+
+    # 4. Expand any blob URLs into inline code
+    markdown = _expand_code_references(raw_md, client)
 
     url_noun = "issues" if noun == "issues" else "pull"
 
@@ -230,3 +233,60 @@ def _to_markdown(issue: dict, comments: List[dict]) -> str:
             md.append("---\n")
 
     return "\n".join(md).rstrip() + "\n"
+
+
+def _expand_code_references(markdown: str, client: httpx.Client) -> str:
+    """
+    Find GitHub blob URLs with #L… or #L…-L… in the markdown,
+    fetch the file (via API when GITHUB_TOKEN is set, else raw.githubusercontent),
+    extract the requested lines, and replace the URL with a fenced code block.
+    """
+    raw_cache: dict = {}
+
+    blob_rx = re.compile(
+        r"(https://github\.com/(?P<owner>[^/]+)"
+        r"/(?P<repo>[^/]+)/blob/"
+        r"(?P<ref>[^/]+)/(?P<path>[^#\s]+)"
+        r"#L(?P<start>\d+)(?:-L(?P<end>\d+))?)"
+    )
+
+    def fetch_snippet(match: re.Match) -> str:
+        full_url = match.group(1)
+        owner = match.group("owner")
+        repo = match.group("repo")
+        ref = match.group("ref")
+        path = match.group("path")
+        start = int(match.group("start"))
+        end = int(match.group("end")) if match.group("end") else start
+
+        token = os.getenv("GITHUB_TOKEN")
+        if token:
+            # Use GitHub Contents API with raw accept header
+            fetch_url = (
+                f"https://api.github.com/repos/{owner}/{repo}"
+                f"/contents/{path}?ref={ref}"
+            )
+            headers = {"Accept": "application/vnd.github.v3.raw"}
+        else:
+            fetch_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}"
+            headers = {}
+
+        if fetch_url not in raw_cache:
+            resp = client.get(fetch_url, headers=headers)
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError:
+                raw_cache[fetch_url] = None
+            else:
+                raw_cache[fetch_url] = resp.text.splitlines()
+
+        lines = raw_cache.get(fetch_url)
+        if not lines:
+            return full_url
+
+        end = min(end, len(lines))
+        snippet = "\n".join(lines[start - 1 : end])
+        ext = pathlib.Path(path).suffix.lstrip(".")
+        return f"\n```{ext}\n{snippet}\n```"
+
+    return blob_rx.sub(lambda m: fetch_snippet(m), markdown)

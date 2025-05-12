@@ -91,3 +91,52 @@ def test_github_pr_loader(argument):
         "+It has been modified in this PR.\n"
         "\\ No newline at end of file\n"
     )
+
+
+def test_github_issue_with_code_references(httpx_mock, monkeypatch):
+    # Ensure we hit the raw.githubusercontent.com branch
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    owner = "foo"
+    repo = "bar"
+    number = 1
+
+    # 1) Mock the issue payload
+    issue_api = f"https://api.github.com/repos/{owner}/{repo}/issues/{number}"
+    issue_body = (
+        "Here is some context.\n\n"
+        "Check out this snippet:\n\n"
+        "https://github.com/foo/bar/blob/main/file.py#L2-L3\n"
+    )
+    httpx_mock.add_response(
+        method="GET",
+        url=issue_api,
+        json={
+            "title": "Test Issue",
+            "user": {"login": "alice"},
+            "body": issue_body,
+        },
+    )
+
+    # 2) Mock the comments (none)
+    comments_api = f"{issue_api}/comments?per_page=100"
+    httpx_mock.add_response(method="GET", url=comments_api, json=[])
+
+    # 3) Mock fetching the raw file from raw.githubusercontent.com
+    raw_url = "https://raw.githubusercontent.com/foo/bar/main/file.py"
+    file_contents = "line1\nline2\nline3\n"
+    httpx_mock.add_response(method="GET", url=raw_url, text=file_contents)
+
+    # Load the fragment
+    fragment = github_issue_loader(f"{owner}/{repo}/{number}")
+    text = str(fragment)
+
+    # It should have inlined lines 2–3 in a ```py fence
+    assert "```py\nline2\nline3\n```" in text
+
+    # And it should no longer contain the original blob URL
+    assert "github.com/foo/bar/blob/main/file.py" not in text
+
+    # Also check the header and poster line remain intact
+    assert text.startswith("# Test Issue")
+    assert "*Posted by @alice*" in text
