@@ -37,6 +37,7 @@ Use` -f pr:user/repo/number` to load the Markdown text and diff for a specified 
 ```bash
 llm -f pr:simonw/llm-fragments-github/9 'code review'
 ```
+Both `issue:` and `pr:` will attempt to expand any URLs to code blocks to include that code as part of the exported Markdown. [#12](https://github.com/simonw/llm-fragments-github/issues/12)
 
 ## Development
 
