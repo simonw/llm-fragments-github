@@ -113,7 +113,11 @@ def github_issue_loader(argument: str, noun="issues") -> llm.Fragment:
     issue = issue_resp.json()
 
     # 2. All comments (pagination)
-    comments = _get_all_pages(client, f"{issue_api}/comments?per_page=100")
+    comments_api_url = issue.get("comments_url")
+
+    comments = []
+    if comments_api_url:
+        comments = _get_all_pages(client, f"{comments_api_url}?per_page=100")
 
     # 3. Markdown
     raw_md = _to_markdown(issue, comments)

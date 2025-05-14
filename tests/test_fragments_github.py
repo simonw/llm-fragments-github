@@ -74,7 +74,7 @@ def test_github_pr_loader(argument):
     )
     assert (
         str(fragments[0])
-        == "# Example PR\n\n*Posted by @simonw*\n\nThis is an example PR.\n"
+        == "# Example PR\n\n*Posted by @simonw*\n\nThis is an example PR.\n\n---\n\n### Comment by @simonw\n\nIt has one comment.\n\n---\n"
     )
     assert (
         fragments[1].source
