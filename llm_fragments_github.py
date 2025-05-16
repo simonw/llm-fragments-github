@@ -21,6 +21,7 @@ def github_loader(argument: str) -> List[llm.Fragment]:
     Load files from a GitHub repository as fragments
 
     Argument is a GitHub repository URL or username/repository
+    Works with both github.com and GitHub Enterprise instances
     """
     # Normalize the repository argument
     if not argument.startswith(("http://", "https://")):
@@ -94,6 +95,7 @@ def github_issue_loader(argument: str, noun="issues") -> llm.Fragment:
     Fetch GitHub issue/pull and comments as Markdown
 
     Argument is either "owner/repo/NUMBER" or URL to an issue
+    Works with both github.com and GitHub Enterprise instances
     """
     try:
         owner, repo, number = _parse_argument(argument)
@@ -103,9 +105,16 @@ def github_issue_loader(argument: str, noun="issues") -> llm.Fragment:
             "GitHub issue URL – received {!r}".format(argument)
         ) from ex
 
+    # Determine if this is github.com or GitHub Enterprise
+    domain = "github.com"
+    if argument.startswith(("http://", "https://")):
+        domain = _get_github_domain(argument)
+
+    # Get the appropriate API base URL
+    api_base = _get_api_base_url(domain)
     client = _github_client()
 
-    issue_api = f"https://api.github.com/repos/{owner}/{repo}/{noun}/{number}"
+    issue_api = f"{api_base}/repos/{owner}/{repo}/{noun}/{number}"
 
     # 1. The issue itself
     issue_resp = client.get(issue_api)
@@ -123,9 +132,14 @@ def github_issue_loader(argument: str, noun="issues") -> llm.Fragment:
 
     url_noun = "issues" if noun == "issues" else "pull"
 
+    # Use the appropriate domain for the source URL
+    source_domain = "github.com"
+    if argument.startswith(("http://", "https://")):
+        source_domain = _get_github_domain(argument)
+
     return llm.Fragment(
         markdown,
-        source=f"https://github.com/{owner}/{repo}/{url_noun}/{number}",
+        source=f"https://{source_domain}/{owner}/{repo}/{url_noun}/{number}",
     )
 
 
@@ -143,9 +157,17 @@ def github_pr_loader(argument: str) -> List[llm.Fragment]:
             "GitHub pull request URL – received {!r}".format(argument)
         ) from ex
 
+    # Determine if this is github.com or GitHub Enterprise
+    domain = "github.com"
+    if argument.startswith(("http://", "https://")):
+        domain = _get_github_domain(argument)
+
+    # Get the appropriate API base URL
+    api_base = _get_api_base_url(domain)
+
     client = _github_client()
     markdown_fragment = github_issue_loader(argument, noun="pulls")
-    diff_api = f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}.diff"
+    diff_api = f"{api_base}/repos/{owner}/{repo}/pulls/{number}.diff"
     diff_resp = client.get(
         diff_api, headers={"Accept": "application/vnd.github.v3.diff"}
     )
@@ -182,6 +204,28 @@ def _parse_argument(arg: str) -> Tuple[str, str, int]:
     raise ValueError("Issue should be org/repo/NUMBER or a full GitHub URL")
 
 
+def _get_github_domain(url: str) -> str:
+    """
+    Extract the GitHub domain from a URL.
+    Returns "github.com" for public GitHub or custom domain for GitHub Enterprise.
+    """
+    if url.startswith(("http://", "https://")):
+        parsed = urlparse(url)
+        return parsed.netloc
+    return "github.com"
+
+
+def _get_api_base_url(domain: str) -> str:
+    """
+    Returns the base API URL for the given GitHub domain.
+    For github.com, returns api.github.com
+    For GitHub Enterprise, returns domain/api/v3
+    """
+    if domain == "github.com":
+        return "https://api.github.com"
+    return f"https://{domain}/api/v3"
+
+
 def _github_client() -> httpx.Client:
     headers = {"Accept": "application/vnd.github+json"}
     token = os.getenv("GITHUB_TOKEN")
@@ -201,19 +245,21 @@ def _raise_for_status(resp: httpx.Response, url: str) -> None:
 
 def _get_all_pages(client: httpx.Client, url: str) -> List[dict]:
     items: List[dict] = []
-    while url:
-        resp = client.get(url)
-        _raise_for_status(resp, url)
+    current_url: str = url
+    while current_url:
+        resp = client.get(current_url)
+        _raise_for_status(resp, current_url)
         items.extend(resp.json())
 
         # Link header pagination
-        url = None
+        next_url: str | None = None
         link = resp.headers.get("Link")
         if link:
             for part in link.split(","):
                 if part.endswith('rel="next"'):
-                    url = part[part.find("<") + 1 : part.find(">")]
+                    next_url = part[part.find("<") + 1 : part.find(">")]
                     break
+        current_url = next_url if next_url else ""
     return items
 
 
@@ -244,7 +290,7 @@ def _expand_code_references(markdown: str, client: httpx.Client) -> str:
     raw_cache: dict = {}
 
     blob_rx = re.compile(
-        r"(https://github\.com/(?P<owner>[^/]+)"
+        r"(https://(?P<domain>[^/]+)/(?P<owner>[^/]+)"
         r"/(?P<repo>[^/]+)/blob/"
         r"(?P<ref>[^/]+)/(?P<path>[^#\s]+)"
         r"#L(?P<start>\d+)(?:-L(?P<end>\d+))?)"
@@ -252,6 +298,7 @@ def _expand_code_references(markdown: str, client: httpx.Client) -> str:
 
     def fetch_snippet(match: re.Match) -> str:
         full_url = match.group(1)
+        domain = match.group("domain")
         owner = match.group("owner")
         repo = match.group("repo")
         ref = match.group("ref")
@@ -260,15 +307,21 @@ def _expand_code_references(markdown: str, client: httpx.Client) -> str:
         end = int(match.group("end")) if match.group("end") else start
 
         token = os.getenv("GITHUB_TOKEN")
+        api_base = _get_api_base_url(domain)
+
         if token:
             # Use GitHub Contents API with raw accept header
             fetch_url = (
-                f"https://api.github.com/repos/{owner}/{repo}"
+                f"{api_base}/repos/{owner}/{repo}"
                 f"/contents/{path}?ref={ref}"
             )
             headers = {"Accept": "application/vnd.github.v3.raw"}
         else:
-            fetch_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}"
+            if domain == "github.com":
+                fetch_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}"
+            else:
+                # GitHub Enterprise raw URL format
+                fetch_url = f"https://{domain}/raw/{owner}/{repo}/{ref}/{path}"
             headers = {}
 
         if fetch_url not in raw_cache:
