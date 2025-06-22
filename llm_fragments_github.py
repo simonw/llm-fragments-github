@@ -113,10 +113,24 @@ def github_issue_loader(argument: str, noun="issues") -> llm.Fragment:
     issue = issue_resp.json()
 
     # 2. All comments (pagination)
-    comments = _get_all_pages(client, f"{issue_api}/comments?per_page=100")
+    comments_api_url = issue.get("comments_url")
 
-    # 3. Markdown
-    raw_md = _to_markdown(issue, comments)
+    comments = []
+    if comments_api_url:
+        comments = _get_all_pages(client, f"{comments_api_url}?per_page=100")
+
+    # 3. Review comments, if any
+    review_comments = []
+    if noun == "pulls":
+        review_comments_api_url = (
+            f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}/comments"
+        )
+        review_comments = _get_all_pages(
+            client, f"{review_comments_api_url}?per_page=100"
+        )
+
+    # 4. Markdown
+    raw_md = _to_markdown(issue, comments, review_comments)
 
     # 4. Expand any blob URLs into inline code
     markdown = _expand_code_references(raw_md, client)
@@ -217,22 +231,59 @@ def _get_all_pages(client: httpx.Client, url: str) -> List[dict]:
     return items
 
 
-def _to_markdown(issue: dict, comments: List[dict]) -> str:
-    md: List[str] = []
-    md.append(f"# {issue['title']}\n")
-    md.append(f"*Posted by @{issue['user']['login']}*\n")
+def _to_markdown(
+    issue: dict, comments: List[dict], review_comments: List[dict] | None = None
+) -> str:
+    md_parts: List[str] = []
+    md_parts.append(f"# {issue['title']}")
+    md_parts.append(f"*Posted by @{issue['user']['login']}*")
     if issue.get("body"):
-        md.append(issue["body"] + "\n")
+        md_parts.append(issue["body"])
 
     if comments:
-        md.append("---\n")
+        md_parts.append("## Comments")
         for c in comments:
-            md.append(f"### Comment by @{c['user']['login']}\n")
+            md_parts.append(f"#### Comment by @{c['user']['login']}")
             if c.get("body"):
-                md.append(c["body"] + "\n")
-            md.append("---\n")
+                md_parts.append(c["body"])
+            md_parts.append("---")
 
-    return "\n".join(md).rstrip() + "\n"
+    if review_comments:
+        review_md_parts = []
+        review_md_parts.append("## Review comments\n")
+
+        # Group comments into threads
+        threads = {}
+        for comment in review_comments:
+            thread_id = comment.get("in_reply_to_id") or comment["id"]
+            if thread_id not in threads:
+                threads[thread_id] = []
+            threads[thread_id].append(comment)
+
+        # Then group threads by file path
+        threads_by_file = {}
+        for thread_id, thread_comments in threads.items():
+            # All comments in a thread have the same path
+            path = thread_comments[0]["path"]
+            if path not in threads_by_file:
+                threads_by_file[path] = []
+            threads_by_file[path].append(thread_comments)
+
+        for path, path_threads in threads_by_file.items():
+            review_md_parts.append(f"### On file `{path}`\n")
+            for thread in path_threads:
+                # The first comment is the head of the thread
+                first_comment = thread[0]
+                review_md_parts.append(f"```diff\n{first_comment['diff_hunk']}\n```\n")
+                for comment in thread:
+                    review_md_parts.append(
+                        f"#### Comment by @{comment['user']['login']}\n\n{comment['body']}\n"
+                    )
+                review_md_parts.append("---")
+
+        md_parts.append("\n".join(review_md_parts))
+
+    return "\n\n".join(md_parts).rstrip() + "\n"
 
 
 def _expand_code_references(markdown: str, client: httpx.Client) -> str:

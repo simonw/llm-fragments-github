@@ -36,10 +36,10 @@ def test_github_issue_loader(argument):
         "# Example issue\n\n"
         "*Posted by @simonw*\n\n"
         "Has a description.\n\n"
-        "---\n\n"
-        "### Comment by @simonw\n\n"
+        "## Comments\n\n"
+        "#### Comment by @simonw\n\n"
         "Comment 1.\n\n"
-        "---\n\n### Comment by @simonw\n\n"
+        "---\n\n#### Comment by @simonw\n\n"
         "Comment 2.\n\n"
         "---\n"
     )
@@ -74,7 +74,7 @@ def test_github_pr_loader(argument):
     )
     assert (
         str(fragments[0])
-        == "# Example PR\n\n*Posted by @simonw*\n\nThis is an example PR.\n"
+        == "# Example PR\n\n*Posted by @simonw*\n\nThis is an example PR.\n\n## Comments\n\n#### Comment by @simonw\n\nIt has one comment.\n\n---\n"
     )
     assert (
         fragments[1].source
@@ -91,6 +91,85 @@ def test_github_pr_loader(argument):
         "+It has been modified in this PR.\n"
         "\\ No newline at end of file\n"
     )
+
+
+@pytest.mark.parametrize(
+    "argument",
+    (
+        "giuli007/llm-fragments-github/1",
+        "https://github.com/giuli007/llm-fragments-github/pull/1",
+    ),
+)
+def test_github_pr_loader_review_comments(argument):
+    fragments = github_pr_loader(argument)
+    assert len(fragments) == 2
+    assert (
+        fragments[0].source
+        == "https://github.com/giuli007/llm-fragments-github/pull/1"
+    )
+    expected_markdown = (
+        "# A test PR\n\n"
+        "*Posted by @giuli007*\n\n"
+        "PR test description\n\n"
+        "## Comments\n\n"
+        "#### Comment by @giuli007\n\n"
+        "Comment 1\n\n"
+        "---\n\n"
+        "## Review comments\n\n"
+        "### On file `llm_fragments_github.py`\n\n"
+        "```diff\n"
+        "@@ -22,7 +22,6 @@ def github_loader(argument: str) -> List[llm.Fragment]:\n"
+        " \n"
+        "     Argument is a GitHub repository URL or username/repository\n"
+        '     """\n'
+        "-    # Normalize the repository argument\n"
+        "```\n\n"
+        "#### Comment by @giuli007\n\n"
+        "Inline comment 1\n\n"
+        "#### Comment by @giuli007\n\n"
+        "Inline comment 3\n\n"
+        "---\n"
+        "```diff\n"
+        "@@ -183,6 +182,8 @@ def _parse_argument(arg: str) -> Tuple[str, str, int]:\n"
+        " \n"
+        " \n"
+        " def _github_client() -> httpx.Client:\n"
+        "+    # creates client\n"
+        "+    # and use token if set\n"
+        "```\n\n"
+        "#### Comment by @giuli007\n\n"
+        "Inline comment 2\n\n"
+        "---\n"
+    )
+    assert str(fragments[0]) == expected_markdown
+    assert (
+        fragments[1].source
+        == "https://api.github.com/repos/giuli007/llm-fragments-github/pulls/1.diff"
+    )
+    expected_diff = (
+        "diff --git a/llm_fragments_github.py b/llm_fragments_github.py\n"
+        "index 371e058..a4b4e65 100644\n"
+        "--- a/llm_fragments_github.py\n"
+        "+++ b/llm_fragments_github.py\n"
+        "@@ -22,7 +22,6 @@ def github_loader(argument: str) -> List[llm.Fragment]:\n"
+        " \n"
+        "     Argument is a GitHub repository URL or username/repository\n"
+        '     """\n'
+        "-    # Normalize the repository argument\n"
+        '     if not argument.startswith(("http://", "https://")):\n'
+        "         # Assume format is username/repo\n"
+        '         repo_url = f"https://github.com/{argument}.git"\n'
+        "@@ -183,6 +182,8 @@ def _parse_argument(arg: str) -> Tuple[str, str, int]:\n"
+        " \n"
+        " \n"
+        " def _github_client() -> httpx.Client:\n"
+        "+    # creates client\n"
+        "+    # and use token if set\n"
+        '     headers = {"Accept": "application/vnd.github+json"}\n'
+        '     token = os.getenv("GITHUB_TOKEN")\n'
+        "     if token:\n"
+    )
+    assert str(fragments[1]) == expected_diff
 
 
 def test_github_issue_with_code_references(httpx_mock, monkeypatch):
@@ -115,6 +194,7 @@ def test_github_issue_with_code_references(httpx_mock, monkeypatch):
             "title": "Test Issue",
             "user": {"login": "alice"},
             "body": issue_body,
+            "comments_url": f"https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments",
         },
     )
 
