@@ -149,6 +149,9 @@ def github_pr_loader(argument: str) -> List[llm.Fragment]:
     diff_resp = client.get(
         diff_api, headers={"Accept": "application/vnd.github.v3.diff"}
     )
+    if diff_resp.status_code == 406:
+        # GitHub may refuse to render large diffs; keep the PR metadata.
+        return [markdown_fragment]
     _raise_for_status(diff_resp, diff_api)
     diff = diff_resp.text
     return [
